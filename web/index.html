@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+
+<head>
+
+  <meta charset="utf-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+  <meta name="theme-color" content="#0f7b6c">
+
+  <title>质量千里行</title>
+
+  <meta name="build-version" content="20261013e">
+
+  <!-- 预加载拉丁字体（Inter，仅字母/数字，不含中文）。字体文件名内含内容 hash，
+       故不带 ?v= 版本戳——带戳会与 CSS 里的 URL 不一致，导致浏览器重复下载。
+       as="font" 必须配 crossorigin（字体请求走 CORS 模式），否则预加载会被丢弃。 -->
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="fonts/inter-latin.260c81a4.woff2">
+
+  <link rel="stylesheet" href="css/style.css?v=20261013e">
+
+  <link rel="manifest" href="manifest.json">
+
+  <!-- PWA / 添加到主屏（在HTTPS 下生效；HTTP 下浏览器忽略，不影响原站点） -->
+
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <meta name="apple-mobile-web-app-title" content="质量千里行">
+
+  <meta name="application-name" content="质量千里行">
+
+  <!-- 版本自检：入口页(无 ?v=)自动客户端跳转到带版本号的 URL，击穿微信 HTTP 强缓存 -->
+  <script>
+  var BUILD_VERSION='20261013e';
+  (function(){
+    try{
+      // 只要 URL 已带 v= 参数就不再跳转：避免因 BUILD_VERSION 与资源戳漂移导致反复重定向白屏
+      if(!/[?&]v=/.test(location.search)){
+        var h = location.hash || '';
+        location.replace('/?v='+BUILD_VERSION+'&_='+Date.now()+h);
+      }
+    }catch(e){}
+  })();
+  </script>
+
+  <!-- 全局错误捕获：任何脚本错误都上报服务端日志，并在白屏时显示红字而非纯白，便于排查微信内白屏 -->
+  <script>
+  (function(){
+    function send(msg, stack){
+      try{
+        var x = new XMLHttpRequest();
+        x.open('POST','/api/client-log',true);
+        x.setRequestHeader('Content-Type','application/json');
+        x.send(JSON.stringify({msg:String(msg||''),stack:String(stack||''),url:location.href,ua:navigator.userAgent}));
+      }catch(e){}
+    }
+    function show(msg){
+      try{
+        var app=document.getElementById('app');
+        if(app && !app.childElementCount){
+          app.innerHTML='<div style="padding:28px 20px;color:#c0392b;font-size:14px;line-height:1.7">'+
+            '页面加载出现异常：<br><b>'+String(msg||'').replace(/</g,'&lt;')+'</b><br><br>'+
+            '请将此界面截图发给管理员；或在微信右上角「···」→「在浏览器打开」后重试。</div>';
+        }
+      }catch(e){}
+    }
+    window.addEventListener('error',function(e){
+      var m=(e&&e.message)||(e&&e.error&&e.error.message)||'ResourceError';
+      var s=(e&&e.error&&e.error.stack)||((e&&e.filename)+':'+(e&&e.lineno)+':'+(e&&e.colno))||'';
+      send(m,s); show(m);
+    },true);
+    window.addEventListener('unhandledrejection',function(e){
+      var r=e&&e.reason; var m='unhandledrejection: '+((r&&r.message)||r); var s=(r&&r.stack)||'';
+      send(m,s); show(m);
+    });
+  })();
+  </script>
+</head>
+
+<body>
+
+  <div id="app"></div>
+
+
+
+  <!-- Toast -->
+
+  <div id="toast" class="toast"></div>
+
+
+
+  <!-- Loading -->
+
+  <div id="loading" class="loading-mask" style="display:none">
+
+    <div class="spinner"></div>
+
+  </div>
+
+
+
+  <!-- html2canvas / jspdf / xlsx：仅「导出 PDF」与「Excel 预览」用到，已改为按需懒加载（见 pages2.js / ui.js），不再阻塞首屏 -->
+  <script src="js/api.js?v=20261013e"></script>
+
+  <script src="js/demo.js?v=20261013e"></script>
+
+  <script src="js/ui.js?v=20261013e"></script>
+
+  <script src="js/pages.js?v=20261013e"></script>
+
+  <script src="js/pages2.js?v=20261013e"></script>
+
+  <script src="js/pages4.js?v=20261013e"></script>
+
+  <script src="js/splash.js?v=20261013e"></script>
+  <script src="js/app.js?v=20261013e"></script>
+
+</body>
+
+</html>
+

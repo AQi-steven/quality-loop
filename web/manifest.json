@@ -1,0 +1,24 @@
+{
+  "name": "质量千里行",
+  "short_name": "质量千里行",
+  "description": "质量管理部门 · 质量信息管理平台",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f7b6c",
+  "theme_color": "#0f7b6c",
+  "id": "/",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "首页", "url": "/" },
+    { "name": "PDCA 问题", "url": "/#/pdca" },
+    { "name": "质量库", "url": "/#/work" }
+  ]
+}

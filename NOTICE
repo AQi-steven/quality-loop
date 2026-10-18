@@ -1,0 +1,13 @@
+# 第三方组件致谢
+
+本仓库 vendored 了以下开源组件（位于 web/vendor/ 与 web/js/vendor/）：
+
+| 组件 | 许可证 | 项目地址 |
+|---|---|---|
+| Univer（@univerjs/core、sheets-core、sheets-facade、engine-render） | Apache-2.0 | https://github.com/dream-num/univer |
+| ExcelJS | MIT | https://github.com/exceljs/exceljs |
+| JSZip | MIT / GPL-3.0 双许可 | https://github.com/Stuk/jszip |
+| SheetJS（xlsx.full.min.js） | 见官网声明 | https://sheetjs.com/ |
+
+使用时请遵守各自许可证。Univer 与 ExcelJS 用于 Excel 高保真预览；
+JSZip 用于解析非标准 ZIP 包（WPS 生成的反斜杠路径）；SheetJS 为备用导出库。

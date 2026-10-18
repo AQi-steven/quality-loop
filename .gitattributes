@@ -1,0 +1,5 @@
+# 统一换行符为 LF，避免 Windows / macOS  checkout 产生全文件 diff
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
