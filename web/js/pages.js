@@ -202,7 +202,7 @@ const Pages = (() => {
               <path d="M34 22V16" stroke="#E8A33D" stroke-width="1.6"/>
             </svg>
           </div>
-          <div class="lp-title-sm">质量管理部门</div>
+          <div class="lp-title-sm">${(window.APP_CONFIG || {}).orgName || '质量信息管理平台'}</div>
           <div class="lp-title">质量千里行</div>
           <div class="lp-subtitle">质量信息管理平台</div>
           <div class="lp-card">
@@ -216,7 +216,7 @@ const Pages = (() => {
         </div>
         <div class="lp-footer">
           <div class="lp-slogan">人人都是质量参与者</div>
-          <div class="lp-ver">example.com</div>
+          <div class="lp-ver">${(window.APP_CONFIG || {}).domain || ''}</div>
         </div>
       </div>`;
 
@@ -319,7 +319,7 @@ const Pages = (() => {
       ${UI.photoGrid(phs)}
       ${UI.attChips(data.attachments)}
       ${extraHtml || ''}
-      ${imaSynced ? '<div class="li-meta mt12">' + UI.imaTag(imaPath || ['SHARE-知识库'], data.ima_url || data.imaUrl || '') + '</div>' : ''}
+      ${imaSynced ? '<div class="li-meta mt12">' + UI.imaTag(imaPath || [(window.IMA_KB||'SHARE-知识库')], data.ima_url || data.imaUrl || '') + '</div>' : ''}
     `, (mask, close) => {
       if (canEdit) {
         const b = mask.querySelector('#oc-edit');
@@ -345,7 +345,7 @@ const Pages = (() => {
       const meta = `${scopeTag}<span>📣 ${esc(a.publisher || '')}</span><span>${UI.relTime(a.created_at)}</span><span>公示至 ${esc((a.expiry_date || '').slice(0, 10) || '长期')}</span>`;
       const ackCanRemind = (App.caps.canManage && !App.caps.isGuest) || (App.user && a.publisher_id === App.user.id);
       const ackHtml = Pages.ackBlockHtml('announcement', a.id, { requireAck: a.require_ack, canRemind: ackCanRemind, instance: 'modal', autoOpen: true });
-      openContentModal(a.title, a, meta, a.ima_synced, ['SHARE-知识库','00千里行质量公告'], a.canEdit, () => Pages.editAnnouncement(a.id), '', ackHtml, () => Pages.loadAck('announcement', a.id, 'modal'));
+      openContentModal(a.title, a, meta, a.ima_synced, [(window.IMA_KB||'SHARE-知识库'),'00千里行质量公告'], a.canEdit, () => Pages.editAnnouncement(a.id), '', ackHtml, () => Pages.loadAck('announcement', a.id, 'modal'));
     } catch (e) { UI.toast(e.message); }
   }
 
@@ -365,7 +365,7 @@ const Pages = (() => {
       const noteHtml = (d.manager_note && String(d.manager_note).trim()) ? UI.noteSectionHtml('dissem', d.id, d.manager_note, d.manager_note_by, d.manager_note_at, App.caps.canManage) : '';
       const ackCanRemind = (App.caps.canManage && !App.caps.isGuest) || (App.user && d.publisher_id === App.user.id);
       const ackHtml = Pages.ackBlockHtml('dissem', d.id, { requireAck: d.require_ack, canRemind: ackCanRemind, instance: 'modal', autoOpen: true });
-      openContentModal(d.title, d, meta, d.ima_media_id, ['SHARE-知识库','01千里行质量宣贯'], d.canEdit, () => Pages.editDissem(d.id), noteHtml, ackHtml, () => Pages.loadAck('dissem', d.id, 'modal'));
+      openContentModal(d.title, d, meta, d.ima_media_id, [(window.IMA_KB||'SHARE-知识库'),'01千里行质量宣贯'], d.canEdit, () => Pages.editDissem(d.id), noteHtml, ackHtml, () => Pages.loadAck('dissem', d.id, 'modal'));
     } catch (e) { UI.toast(e.message); }
   }
 
@@ -471,7 +471,7 @@ const Pages = (() => {
     return `
       <div class="ann-card clickable" onclick="Pages.viewDissem(${d.id})">
         <div class="li-head"><div class="li-title">${esc(d.title)}</div>${editBtn}${delBtn}</div>
-        <div class="li-meta">${d.category ? `<span class="tag">${esc(d.category)}</span>` : ''}${statusBadge}${divs.length ? `<span>🏢 ${divs.map(esc).join(' / ')}</span>` : ''}${subs.length ? `<span>🔻 ${subs.map(s => UI.subDivLabel(s)).join(' / ')}</span>` : ''}${regs.length ? `<span>📍 ${regs.map(esc).join(' / ')}</span>` : ''}${d.ima_media_id ? UI.imaTag(['SHARE-知识库','01千里行质量宣贯'], d.ima_url || '') : ''}</div>
+        <div class="li-meta">${d.category ? `<span class="tag">${esc(d.category)}</span>` : ''}${statusBadge}${divs.length ? `<span>🏢 ${divs.map(esc).join(' / ')}</span>` : ''}${subs.length ? `<span>🔻 ${subs.map(s => UI.subDivLabel(s)).join(' / ')}</span>` : ''}${regs.length ? `<span>📍 ${regs.map(esc).join(' / ')}</span>` : ''}${d.ima_media_id ? UI.imaTag([(window.IMA_KB||'SHARE-知识库'),'01千里行质量宣贯'], d.ima_url || '') : ''}</div>
         <div class="li-desc">${esc(d.content)}</div>
         ${UI.photoGrid(d.photos, false)}
         ${attChips(d.attachments, false)}
@@ -701,7 +701,7 @@ const Pages = (() => {
       <div class="li-desc">${esc(a.content)}</div>
       ${UI.photoGrid(a.photos, false)}
       ${attChips(a.attachments, false)}
-      <div class="li-meta"><span>📣 ${esc(a.publisher || '')}</span><span>${UI.relTime(a.created_at)}</span>${a.pinned ? '<span>📌 长期置顶展示</span>' : `<span>公示至 ${esc((a.expiry_date || '').slice(0, 10) || '长期')}</span>`}${a.ima_synced ? UI.imaTag(['SHARE-知识库','00千里行质量公告'], a.ima_url || '') : ''}</div>
+      <div class="li-meta"><span>📣 ${esc(a.publisher || '')}</span><span>${UI.relTime(a.created_at)}</span>${a.pinned ? '<span>📌 长期置顶展示</span>' : `<span>公示至 ${esc((a.expiry_date || '').slice(0, 10) || '长期')}</span>`}${a.ima_synced ? UI.imaTag([(window.IMA_KB||'SHARE-知识库'),'00千里行质量公告'], a.ima_url || '') : ''}</div>
         ${Pages.ackBlockHtml('announcement', a.id, { requireAck: a.require_ack, canRemind: ((App.caps.canManage && !App.caps.isGuest) || (App.user && a.publisher_id === App.user.id)) })}
     </div>`;
   }
@@ -851,7 +851,7 @@ const Pages = (() => {
 
   async function home() {
     const canManage = App.caps.canManage;
-    app().innerHTML = `${topbar('质量千里行', { tall: true })}<div class="page" id="home-body"><div class="empty"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div></div>${tabbar('home')}`;
+    app().innerHTML = `${topbar((window.APP_CONFIG || {}).platformName || '质量千里行', { tall: true })}<div class="page" id="home-body"><div class="empty"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div></div>${tabbar('home')}`;
     try {
       const [anns, stats, rrj, divs, reminders] = await Promise.all([
         API.get('/api/announcements').catch(() => []),

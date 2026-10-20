@@ -120,25 +120,62 @@ router.get('/search', (req, res) => {
 // 答案要求引用资料编号、资料没有就如实说未找到 —— 抑制编造。
 /**
  * 自然语言兜底：FTS 短语对整句问句（无分词）容易 0 命中。
- * 全库扫描（语料 <100 条，毫秒级），按 2-gram IDF 相关度打分取 top N。
+ * 全库扫描（语料 <100 条，毫秒级），按"连续公共子串 + IDF"相关度打分取 top N。
+ *
+ * ⚠️ 2026-10-16 修复（用户实测「电力隧道 有新要求」混入大量无关宣贯）：
+ *   旧算法三宗罪——① q.replace(/\s+/g,'') 把空格抹平，破坏"电力隧道 / 有新要求"
+ *     两个意图边界，造出"道有""新要"等跨词垃圾 2-gram；② 只要文档含任意 1 个
+ *     高频 2-gram（如"电力""要求"几乎篇篇有）就进榜；③ 无相关度门槛、固定 slice(0,8)，
+ *     于是 2 篇真相关的之后，6 个名额被只命中"电力+要求"的无关宣贯填满。
+ *   新算法：① 保留空格分词（不破坏意图边界）；② 要求至少命中一个核心 term 的
+ *     连续 ≥3 字（term≥3 时）或完整 2 字（term==2 时）才入围，过滤纯高频词凑数；
+ *     ③ 相对截断（< top*0.35 丢弃），不强行塞满 8 条。
  */
+function longestContig(txt, t) {
+  const ch = [...String(t)];
+  const m = ch.length;
+  const maxL = Math.min(m, 8);
+  for (let L = maxL; L >= 2; L--) {
+    for (let i = 0; i + L <= m; i++) {
+      if (txt.includes(ch.slice(i, i + L).join(''))) return L;
+    }
+  }
+  return 0;
+}
 function scoreFallback(q, limit, bodyCap) {
-  const s = q.replace(/\s+/g, '');
-  if ([...s].length < 2) return [];
-  const uniq = [...new Set(s.match(/.{2}/g) || [])];
-  if (!uniq.length) return [];
+  const terms = q.split(/\s+/).filter(Boolean).slice(0, 8).filter(t => [...t].length >= 2);
+  if (!terms.length) return [];
   const rows = db.prepare('SELECT kind, ref_id, title, substr(body, 1, ?) AS body, author, route, updated_at FROM qa_fts').all(bodyCap);
+  if (!rows.length) return [];
+  // 预计算 term 文档频率（IDF：越罕见权重越高）
   const df = {};
-  const docs = rows.map(r => {
+  for (const t of terms) {
+    let c = 0;
+    for (const r of rows) {
+      const txt = (r.title || '') + '\n' + (r.body || '');
+      if (longestContig(txt, t) >= 2) c++;
+    }
+    df[t] = c || 1;
+  }
+  const cand = [];
+  for (const r of rows) {
     const txt = (r.title || '') + '\n' + (r.body || '');
-    const hits = uniq.filter(g => txt.includes(g));
-    for (const g of hits) df[g] = (df[g] || 0) + 1;
-    return { r, hits };
-  });
-  return docs
-    .map(({ r, hits }) => ({ r, sc: hits.reduce((n, g) => n + 1 / Math.log(2 + (df[g] || 1)), 0) }))
-    .filter(x => x.sc > 0)
-    .sort((a, b) => b.sc - a.sc)
+    let score = 0, coreOk = false;
+    for (const t of terms) {
+      const ov = longestContig(txt, t);
+      if (ov < 2) continue;
+      const idf = 1 / Math.log(2 + df[t]);
+      score += ov * ov * idf;            // 命中越长越可信，平方加权
+      const need = ([...t].length >= 3) ? 3 : 2;   // 核心门槛：须连续命中 3 字或完整 2 字
+      if (ov >= need) coreOk = true;
+    }
+    if (coreOk) cand.push({ r, score });
+  }
+  if (!cand.length) return [];
+  cand.sort((a, b) => b.score - a.score);
+  const top = cand[0].score;
+  return cand
+    .filter((x, i) => i === 0 || x.score >= top * 0.35)   // 相对截断，不强行塞满
     .slice(0, limit)
     .map(x => x.r);
 }

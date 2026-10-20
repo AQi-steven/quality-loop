@@ -15,17 +15,19 @@
 const express = require('express');
 const db = require('../db/connection');
 const authMiddleware = require('../middleware/auth');
-const { HIDDEN_DIVISIONS } = require('../divisions');
+const { HIDDEN_DIVISIONS, DISPLAY_HIDDEN_DIVISIONS } = require('../divisions');
 
 const router = express.Router();
 router.use(authMiddleware);
 
 // ─── 收件人候选（全员，排除自己；排除暂不参与的专业室）──────────────────
 router.get('/users', (req, res) => {
-  const hidden = HIDDEN_DIVISIONS.map(() => '?').join(',');
+  // 排除暂不参与程序的科室（综管/综能/节能，见 HIDDEN_DIVISIONS）+ 不参与提醒的专业（咨询，见 DISPLAY_HIDDEN_DIVISIONS）
+  const hiddenDivisions = [...HIDDEN_DIVISIONS, ...DISPLAY_HIDDEN_DIVISIONS];
+  const hidden = hiddenDivisions.map(() => '?').join(',');
   const rows = db.prepare(
     `SELECT id, real_name, role, title_tag FROM users WHERE is_active=1 AND id<>? AND (division IS NULL OR division NOT IN (${hidden})) ORDER BY role ASC, real_name ASC`
-  ).all(req.user.id, ...HIDDEN_DIVISIONS);
+  ).all(req.user.id, ...hiddenDivisions);
   res.json(rows);
 });
 

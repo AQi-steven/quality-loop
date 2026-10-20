@@ -9,8 +9,8 @@
  */
 
 const express = require('express');
-const bcrypt = require('bcryptjs');
 const config = require('../config');
+const bcryptPool = require('../bcryptPool');
 const db = require('../db/connection');
 const authMiddleware = require('../middleware/auth');
 const { safeExtra, publicUser, signToken, recordLogin } = require('../authHelpers');
@@ -55,6 +55,26 @@ function recordLoginFail(key) {
 }
 
 // ─── 登录 ───────────────────────────────────────────
+// 2026-10-18 大会加固（80 人并发赛前）：bcryptjs 是纯 JS 且跑在主线程——
+// 同步版 cost10 ≈ 93ms/次独占事件循环，80 人同时登录 = 80×93ms ≈ 7.4s
+// 全站无响应；异步版每次让出间隔长达 100ms，高并发下仍会饿死 I/O
+// （实测 60 路洪峰中静态请求被堵 3.7s）。故密码校验整体移到 worker
+// 线程池（bcryptPool.js），主线程事件循环零阻塞；哈希格式不变，存量密码不受影响。
+function finishLogin(req, res, user, failKey, isGuest) {
+  // 登录成功：清除该键的失败计数
+  loginFails.delete(failKey);
+  // 更新最后登录时间 + 最近活跃时间，并记录登录流水
+  recordLogin(req, user);
+  // 签发JWT
+  const token = signToken(user);
+  res.json({
+    token,
+    mustChangePwd: !!user.must_change_pwd,
+    isGuest,
+    user: publicUser(user),
+  });
+}
+
 router.post('/login', (req, res) => {
   const { username, password } = req.body;
 
@@ -75,32 +95,36 @@ router.post('/login', (req, res) => {
 
   // 游客免密：is_guest 用户直接放行（密码留空即可），不校验 password_hash
   const isGuest = !!user.is_guest;
-  if (!isGuest) {
-    if (!password) {
-      return res.status(400).json({ error: '请输入密码' });
-    }
-    const valid = bcrypt.compareSync(password, user.password_hash);
-    if (!valid) {
-      recordLoginFail(failKey);
-      return res.status(401).json({ error: '用户名或密码错误' });
-    }
+  if (isGuest) {
+    return finishLogin(req, res, user, failKey, isGuest);
   }
 
-  // 登录成功：清除该键的失败计数
-  loginFails.delete(failKey);
-
-  // 更新最后登录时间 + 最近活跃时间（登录属于"真正登录"，两者都更新），并记录登录流水
-  recordLogin(req, user);
-
-  // 签发JWT
-  const token = signToken(user);
-
-  res.json({
-    token,
-    mustChangePwd: !!user.must_change_pwd,
-    isGuest,
-    user: publicUser(user),
-  });
+  if (!password) {
+    return res.status(400).json({ error: '请输入密码' });
+  }
+  // 2026-10-18 大会加固：bcrypt 计算移至 worker 线程池（见 bcryptPool.js 注释），
+  // 主线程事件循环零阻塞；worker 异常时池内自动降级进程内计算。
+  bcryptPool.compare(password, user.password_hash)
+    .then((valid) => {
+      try {
+        if (!valid) {
+          recordLoginFail(failKey);
+          return res.status(401).json({ error: '用户名或密码错误' });
+        }
+        finishLogin(req, res, user, failKey, isGuest);
+      } catch (e) {
+        console.error('[auth] login async error:', e && (e.stack || e.message));
+        if (!res.headersSent) {
+          res.status(500).json({ error: '登录失败，请重试' });
+        }
+      }
+    })
+    .catch((e) => {
+      console.error('[auth] login bcrypt error:', e && (e.stack || e.message));
+      if (!res.headersSent) {
+        res.status(500).json({ error: '登录失败，请重试' });
+      }
+    });
 });
 
 // ─── 修改密码 ────────────────────────────────────────
@@ -120,16 +144,25 @@ router.post('/change-pwd', authMiddleware, (req, res) => {
     return res.status(404).json({ error: '用户不存在' });
   }
 
-  const valid = bcrypt.compareSync(oldPassword, user.password_hash);
-  if (!valid) {
-    return res.status(401).json({ error: '旧密码错误' });
-  }
-
-  const hash = bcrypt.hashSync(newPassword, config.password.bcryptRounds);
-  db.prepare('UPDATE users SET password_hash = ?, must_change_pwd = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(hash, user.id);
-
-  res.json({ message: '密码修改成功' });
+  // 2026-10-18 大会加固：改密同样走 worker 池，首登强制改密不再阻塞并发
+  bcryptPool.compare(oldPassword, user.password_hash)
+    .then((valid) => {
+      if (!valid) {
+        return res.status(401).json({ error: '旧密码错误' });
+      }
+      return bcryptPool.hash(newPassword, config.password.bcryptRounds)
+        .then((hash) => {
+          db.prepare('UPDATE users SET password_hash = ?, must_change_pwd = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(hash, user.id);
+          res.json({ message: '密码修改成功' });
+        });
+    })
+    .catch((e) => {
+      console.error('[auth] change-pwd error:', e && (e.stack || e.message));
+      if (!res.headersSent) {
+        res.status(500).json({ error: '密码修改失败，请重试' });
+      }
+    });
 });
 
 // ─── 获取当前用户信息 ────────────────────────────────

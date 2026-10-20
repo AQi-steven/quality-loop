@@ -173,6 +173,11 @@ input, textarea, select, button { font-family: inherit; font-size: 15px; }
 .exam-round-by { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .exam-round-scope { margin: 8px 0 4px; display: flex; flex-wrap: wrap; gap: 6px; }
 .exam-scope-tag { font-size: 12px; background: #eaf6f3; color: var(--primary); padding: 2px 8px; border-radius: 10px; }
+.exam-open-tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.exam-open-tag.on { background: #e6f4ea; color: #1a7f37; }
+.exam-open-tag.off { background: #f0f0f0; color: #888; }
+.btn-success-outline { border: 1px solid #1a7f37; color: #1a7f37; background: #fff; }
+.btn-success-outline:hover { background: #e6f4ea; }
 .exam-round-meta { font-size: 12px; color: var(--text-muted); }
 .exam-score-row { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.06); cursor: pointer; }
 .exam-score-main { display: flex; align-items: baseline; gap: 3px; min-width: 64px; }

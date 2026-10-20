@@ -9,11 +9,16 @@ const express = require('express');
 const db = require('../db/connection');
 const rbac = require('../rbac');
 const flowers = require('../flowers');
-const { FLOWER_ELIGIBLE_IDS, FLOWER_EXCLUDE_ROLES, flowerShouldExclude, settlePreviousMonth, settleBimonthChampion } = flowers;
+const { FLOWER_ELIGIBLE_IDS, FLOWER_EXCLUDE_ROLES, FLOWER_EXCLUDE_DIVISIONS, flowerShouldExclude, settlePreviousMonth, settleBimonthChampion } = flowers;
 const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authMiddleware);
+
+// 不参与红花评选的专业（咨询）real_name 集合；用于排名榜/结算统一剔除（与其「不参评排名」授权一致）
+function consultNameSet() {
+  return new Set(db.prepare("SELECT real_name FROM users WHERE division='咨询'").all().map(r => r.real_name));
+}
 
 // 手动补充小红花（仅 admin 可调，用于修复历史数据）
 router.post('/fix', (req, res) => {
@@ -43,11 +48,13 @@ router.post('/adjust', (req, res) => {
   if (!reason || !String(reason).trim()) {
     return res.status(400).json({ error: '请填写奖惩原因' });
   }
-  const t = db.prepare('SELECT id, role, is_active FROM users WHERE id=?').get(targetUserId);
+  const t = db.prepare('SELECT id, role, division, is_active FROM users WHERE id=?').get(targetUserId);
   if (!t) return res.status(404).json({ error: '目标用户不存在' });
   if (!t.is_active) return res.status(400).json({ error: '目标用户已禁用' });
-  if (FLOWER_EXCLUDE_ROLES.includes(t.role) && !FLOWER_ELIGIBLE_IDS.has(t.id)) {
-    return res.status(400).json({ error: '专总/院长/总工/系统管理员不参与小红花，不可增减' });
+  const isExcludeRole = FLOWER_EXCLUDE_ROLES.includes(t.role) && !FLOWER_ELIGIBLE_IDS.has(t.id);
+  const isExcludeDiv = FLOWER_EXCLUDE_DIVISIONS.includes(String(t.division || '').trim());
+  if (isExcludeRole || isExcludeDiv) {
+    return res.status(400).json({ error: '专总/院长/总工/系统管理员/咨询 不参与小红花，不可增减' });
   }
   const info = db.prepare(
     `INSERT INTO flower_adjustments (target_user_id, target_name, operator_id, operator_name, delta, reason, created_at)
@@ -62,7 +69,7 @@ router.get('/adjustments', (req, res) => {
   if (!rbac.rolesOf(u).some(r => ['admin', 'dean'].includes(r))) return res.status(403).json({ error: '仅院长/系统管理员可查看' });
   // 不参与红花评选的岗位（专总/院长/总工/系统管理员）的历史奖惩记录也不展示；例外名单仍展示
   const EXCLUDE = FLOWER_EXCLUDE_ROLES;
-  const list = db.prepare(
+  const _rows = db.prepare(
     `SELECT a.id, a.target_user_id, a.target_name, a.operator_name, a.delta, a.reason,
             strftime('%Y-%m-%d %H:%M', a.created_at, '+8 hours') AS created_at
      FROM flower_adjustments a
@@ -70,6 +77,9 @@ router.get('/adjustments', (req, res) => {
      WHERE (u.role IS NULL OR u.role NOT IN (${EXCLUDE.map(r => `'${r}'`).join(',')}) OR u.id IN (${[...FLOWER_ELIGIBLE_IDS].join(',')}))
      ORDER BY a.created_at DESC LIMIT 50`
   ).all();
+  // 不参与评选的专业（咨询）整建制剔除（与其「不参评排名」授权一致）
+  const cnsAdj = consultNameSet();
+  const list = _rows.filter(r => !cnsAdj.has(r.target_name));
   res.json(list);
 });
 
@@ -113,6 +123,9 @@ router.get('/adjust-board', (req, res) => {
     map[r.userName].adjust += (r.delta || 0);
     map[r.userName].records.push({ delta: r.delta, reason: r.reason, operator_name: r.operator_name, created_at: r.created_at });
   }
+  // 不参与评选的专业（咨询）整建制剔除（与其「不参评排名」授权一致）
+  const cns = consultNameSet();
+  for (const n of cns) delete map[n];
   const list = Object.values(map).sort((a, b) => (b.adjust - a.adjust) || (a.userName < b.userName ? -1 : 1));
   res.json(list);
 });
@@ -198,6 +211,9 @@ router.get('/summary', (req, res) => {
         dissemM: 0, pdcaM: 0, rrjM: 0, quizM: 0, dissemY: 0, pdcaY: 0, rrjY: 0, quizY: 0, adjustM: 0, adjustY: 0, champions: 0 };
     }
   }
+  // 不参与评选的专业（咨询）整建制剔除（与其「不参评排名」授权一致；源头 awardFlower 已拦截，此处兜底展示层）
+  const cns = consultNameSet();
+  for (const n of cns) delete map[n];
   const list = Object.values(map).sort((a, b) => (b.count - a.count) || (a.userName < b.userName ? -1 : 1));
   res.json(list);
 });
@@ -262,6 +278,9 @@ router.get('/bimonth', (req, res) => {
   // 已结算的「双月冠军」（type='bimonth'）标记，供前端展示 👑 质量双月冠军（未结算前仅显示 ⭐ 双月领先）
   const champRows = db.prepare("SELECT user_name FROM month_champions WHERE month=? AND type='bimonth' AND status='settled'").all(`${year}-10`);
   const champSet = new Set(champRows.map(c => c.user_name));
+  // 不参与评选的专业（咨询）整建制剔除（与其「不参评排名」授权一致）
+  const cns = consultNameSet();
+  for (const n of cns) { delete map[n]; champSet.delete(n); }
   const list = Object.values(map)
     .sort((a, b) => (b.bimonth - a.bimonth) || (a.userName < b.userName ? -1 : 1))
     .map(x => Object.assign({}, x, { bimonthChampion: champSet.has(x.userName) }));

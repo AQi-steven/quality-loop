@@ -43,6 +43,7 @@ async function send(key, title, content) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal: AbortSignal.timeout(15000), // 硬超时 15s（2026-10-18 排雷）：Server酱 无响应时快速失败，绝不无上限挂起占用 socket
     });
     let j = null;
     try { j = await r.json(); } catch (e) { j = null; }

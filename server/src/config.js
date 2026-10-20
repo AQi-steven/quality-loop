@@ -3,7 +3,12 @@
  *
  * 登录方案：管理员分配账号+密码，零外部依赖
  * 腾讯文档API配置需要在 docs.qq.com/developer/ 注册应用后获取
+ *
+ * 院级差异（平台名/域名/主题色/专业科室/IMA/文档映射/质量周期）统一外置到
+ *   institute.config.js（见 institute.js 加载器）。本文件仅做「读取并透出」。
  */
+
+const institute = require('./institute');
 
 module.exports = {
   // 服务端口
@@ -90,4 +95,14 @@ module.exports = {
     '经验分享',
     '其他',
   ],
+
+  // ── 院级配置（外置，来自 institute.config.js；以下为归一化后的可读副本）──
+  // 平台品牌：前端标题 / manifest / 主题色 / 微信文案
+  platform: institute.platform || { name: '质量千里行', shortName: '质量千里行', domain: '', themeColor: '#0f7b6c' },
+  // IMA 知识库（各院用自己的 IMA 账号）
+  ima: institute.ima || {},
+  // 腾讯文档映射（Q1~Q4 报告）
+  docs: institute.docs || {},
+  // 质量周期特性
+  qualityCycle: institute.qualityCycle || { bimonthChampion: false },
 };

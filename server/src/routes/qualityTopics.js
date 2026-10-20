@@ -133,7 +133,11 @@ router.get('/:id/linkable', (req, res) => {
     .map(r => r.target_type + '#' + r.target_id));
   const like = `%${kw}%`;
   const out = [];
-  const push = (type, rows) => { for (const r of rows) if (!linked.has(type + '#' + r.id)) out.push({ ...r, target_type: type }); };
+  // 2026-10-13 修复：已关联条目不再直接剔除，而是带 linked=true 一并返回，
+  //   由前端置灰标「已关联」展示。原实现静默丢弃，导致用户在候选池搜不到
+  //   误以为「关联丢了」（实测 disseminated 标题写「抽查」而口语/附件名写「抽检」，
+  //   搜「抽检」零结果，加剧误判）。前端对 linked 行禁用勾选与「加入」。
+  const push = (type, rows) => { for (const r of rows) out.push({ ...r, target_type: type, linked: linked.has(type + '#' + r.id) }); };
   // 公告：排除软删；置顶与归档都保留可选（归档内容仍值得挂到专题上做沉淀）
   if (!only || only === 'announcement') {
     const args = []; let sql = "SELECT id, title, publisher, status, created_at, CASE WHEN division IS NULL OR TRIM(division)='' THEN '[]' ELSE json_array(division) END AS divisions FROM announcements WHERE status<>'deleted'";
@@ -142,9 +146,11 @@ router.get('/:id/linkable', (req, res) => {
     push('announcement', db.prepare(sql).all(...args));
   }
   // 宣贯：含 active / archived（到期进质量库的内容同样可挂）
+  // 搜索范围含附件名（2026-10-13）：标题与附件命名口径常不一致（如标题「抽查」、附件「抽检」），
+  //   只搜标题会让人以为内容不存在或关联丢失。
   if (!only || only === 'dissem') {
     const args = []; let sql = "SELECT id, title, publisher, category, status, created_at, CASE WHEN divisions IS NULL OR TRIM(divisions)='' THEN '[]' ELSE divisions END AS divisions FROM quality_dissem WHERE status<>'deleted'";
-    if (kw) { sql += ' AND title LIKE ?'; args.push(like); }
+    if (kw) { sql += ' AND (title LIKE ? OR IFNULL(attachments,\'\') LIKE ?)'; args.push(like, like); }
     sql += ' ORDER BY COALESCE(reviewed_at, created_at) DESC, id DESC LIMIT 50';
     push('dissem', db.prepare(sql).all(...args));
   }

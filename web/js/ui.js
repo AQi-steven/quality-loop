@@ -106,7 +106,7 @@ const UI = (() => {
     let path = [];
     try { path = JSON.parse(el.dataset.imaPath || '[]'); } catch (e) {}
     const u = el.dataset.imaUrl || '';
-    const crumbs = (path.length ? path : ['SHARE-知识库']).map(s => esc(s)).join(' <span class="crumb-sep">›</span> ');
+    const crumbs = (path.length ? path : [(window.IMA_KB||'SHARE-知识库')]).map(s => esc(s)).join(' <span class="crumb-sep">›</span> ');
     const urlHtml = u ? `<a class="btn btn-block btn-ima mt12" href="${esc(u)}" target="_blank" rel="noopener noreferrer">📚 在 IMA 查看原文</a>` : '<p class="text-muted mt12">本条未返回 IMA 原文链接（可稍后重试同步）</p>';
     modal('📚 IMA 归档位置', `<div class="ima-path">${crumbs}</div>${urlHtml}`);
   }

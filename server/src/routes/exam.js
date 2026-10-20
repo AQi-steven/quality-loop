@@ -343,11 +343,11 @@ router.post('/rounds', (req, res) => {
     const rawTitle = req.body && typeof req.body.title === 'string' ? req.body.title.trim() : '';
     const title = (rawTitle && rawTitle.length <= 60) ? rawTitle : `检验池考试·${ts}`;
     const info = db.prepare(
-      'INSERT INTO exam_rounds (title, scope, question_ids, snapshot, created_by, created_by_name) VALUES (?,?,?,?,?,?)'
+      'INSERT INTO exam_rounds (title, scope, question_ids, snapshot, created_by, created_by_name, opened) VALUES (?,?,?,?,?,?,0)'
     ).run(title, JSON.stringify(scope), JSON.stringify(qs.map(q => q.id)), JSON.stringify(snapshot), u.id, u.realName);
     const round = db.prepare('SELECT * FROM exam_rounds WHERE id=?').get(info.lastInsertRowid);
     res.json({
-      round: { id: round.id, title: round.title, scope: JSON.parse(round.scope), count: qs.length, created_by_name: round.created_by_name, created_at: round.created_at, settled: round.settled },
+      round: { id: round.id, title: round.title, scope: JSON.parse(round.scope), count: qs.length, created_by_name: round.created_by_name, created_at: round.created_at, settled: round.settled, opened: round.opened || 0 },
     });
   } catch (e) {
     return res.status(e.status || 500).json({ error: e.message || '组卷失败' });
@@ -369,7 +369,21 @@ router.get('/rounds', (req, res) => {
     created_by_name: r.created_by_name, created_at: r.created_at,
     done_count: r.done_count, my_done: r.my_done,
     settled: r.settled || 0,
+    opened: r.opened || 0,
   })));
+});
+
+// ── 开放 / 关闭一场考试（大会开关：仅考试管理员；关闭后新考生不可 start，
+//    已 in_progress 的考生草稿/提交不受影响，不卡进行中的作答）──────────
+router.post('/rounds/:id/toggle', (req, res) => {
+  const u = req.user;
+  if (!isExamAdmin(u)) return res.status(403).json({ error: '仅 超级管理员 / ××× / ××× 可操作考试开关' });
+  const round = db.prepare('SELECT * FROM exam_rounds WHERE id=?').get(req.params.id);
+  if (!round) return res.status(404).json({ error: '考试不存在' });
+  const next = round.opened ? 0 : 1;
+  db.prepare('UPDATE exam_rounds SET opened=? WHERE id=?').run(next, round.id);
+  const inProg = db.prepare("SELECT COUNT(*) n FROM exam_attempts WHERE round_id=? AND status='in_progress'").get(round.id).n;
+  res.json({ id: round.id, opened: next, in_progress: inProg });
 });
 
 // ── 开始 / 进入一场考试：返回本人乱序后的题目（不含答案），已提交则附带结果 ────
@@ -378,6 +392,9 @@ router.post('/rounds/:id/start', (req, res) => {
   if (u.isGuest && !u.canExam) return res.status(403).json({ error: '游客无法参加考试，请登录后作答' });
   const round = db.prepare('SELECT * FROM exam_rounds WHERE id=?').get(req.params.id);
   if (!round) return res.status(404).json({ error: '考试不存在' });
+  // 2026-10-19 大会开关：未开放的考试任何人不可 start（也不创建 attempt）。
+  // 已 in_progress 的考生若被中途关闭，草稿仍在库，重新开放后可从原 attempt 续答。
+  if (!round.opened) return res.status(403).json({ error: '本场考试尚未开放，请等待管理员开放' });
   const snapshot = JSON.parse(round.snapshot);
   let attempt = db.prepare('SELECT * FROM exam_attempts WHERE round_id=? AND user_id=? ORDER BY id DESC LIMIT 1').get(round.id, u.id);
   let perms;

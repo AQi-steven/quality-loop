@@ -152,6 +152,14 @@ async function buildDocs() {
   async function pushAttachment(a, parentKind, parentId, parentTitle, route, updatedAt) {
     const fp = localPath(a.url);
     if (!fp || !fs.existsSync(fp)) return;
+    // 体积门提前到「抽取前」（2026-10-18 排雷修复）：
+    // 旧代码先跑 unzip 抽正文、抽完才查大小——超大 docx/xlsx 的 unzip 子进程（30s 超时/64MB 缓冲）已经跑完才被跳过，
+    // 体积门形同虚设。超大附件只靠「文件名已并入父级正文」参与检索，不建独立条目、不抽正文。
+    const st = fs.statSync(fp);
+    if (st.size > MAX_FILE_BYTES) {
+      console.warn('[qa] 跳过超大附件（仅文件名参与检索）：', path.basename(fp), (st.size / 1048576).toFixed(1) + 'MB');
+      return;
+    }
     const ext = (a.url.split('?')[0].split('.').pop() || '').toLowerCase();
     let body = '';
     if (ext === 'docx') body = await extractDocx(fp);
@@ -159,8 +167,6 @@ async function buildDocs() {
     else if (ext === 'txt' || ext === 'md') body = await extractTxt(fp);
     // pdf/doc/dwg/图片等：服务器暂无解析器，正文不索引（文件名已并入父级），不建独立条目 —— 不编造能力范围。
     if (!body) return;
-    const st = fs.statSync(fp);
-    if (st.size > MAX_FILE_BYTES) return;
     push('附件', parentId + ':' + a.url, a.name + '（' + parentKind + '·' + parentTitle + '）', body, '', route, updatedAt);
   }
 }

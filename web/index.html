@@ -12,14 +12,14 @@
 
   <title>质量千里行</title>
 
-  <meta name="build-version" content="20261013e">
+  <meta name="build-version" content="20261019b">
 
   <!-- 预加载拉丁字体（Inter，仅字母/数字，不含中文）。字体文件名内含内容 hash，
        故不带 ?v= 版本戳——带戳会与 CSS 里的 URL 不一致，导致浏览器重复下载。
        as="font" 必须配 crossorigin（字体请求走 CORS 模式），否则预加载会被丢弃。 -->
   <link rel="preload" as="font" type="font/woff2" crossorigin href="fonts/inter-latin.260c81a4.woff2">
 
-  <link rel="stylesheet" href="css/style.css?v=20261013e">
+  <link rel="stylesheet" href="css/style.css?v=20261019b">
 
   <link rel="manifest" href="manifest.json">
 
@@ -41,7 +41,7 @@
 
   <!-- 版本自检：入口页(无 ?v=)自动客户端跳转到带版本号的 URL，击穿微信 HTTP 强缓存 -->
   <script>
-  var BUILD_VERSION='20261013e';
+  var BUILD_VERSION='20261019b';
   (function(){
     try{
       // 只要 URL 已带 v= 参数就不再跳转：避免因 BUILD_VERSION 与资源戳漂移导致反复重定向白屏
@@ -110,20 +110,20 @@
 
 
   <!-- html2canvas / jspdf / xlsx：仅「导出 PDF」与「Excel 预览」用到，已改为按需懒加载（见 pages2.js / ui.js），不再阻塞首屏 -->
-  <script src="js/api.js?v=20261013e"></script>
+  <script src="js/api.js?v=20261019b"></script>
 
-  <script src="js/demo.js?v=20261013e"></script>
+  <script src="js/demo.js?v=20261019b"></script>
 
-  <script src="js/ui.js?v=20261013e"></script>
+  <script src="js/ui.js?v=20261019b"></script>
 
-  <script src="js/pages.js?v=20261013e"></script>
+  <script src="js/pages.js?v=20261019b"></script>
 
-  <script src="js/pages2.js?v=20261013e"></script>
+  <script src="js/pages2.js?v=20261019b"></script>
 
-  <script src="js/pages4.js?v=20261013e"></script>
+  <script src="js/pages4.js?v=20261019b"></script>
 
-  <script src="js/splash.js?v=20261013e"></script>
-  <script src="js/app.js?v=20261013e"></script>
+  <script src="js/splash.js?v=20261019b"></script>
+  <script src="js/app.js?v=20261019b"></script>
 
 </body>
 

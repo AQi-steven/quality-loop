@@ -98,6 +98,7 @@ async function imaPost(apiPath, body) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000), // 硬超时 15s（2026-10-18 排雷）：IMA 无响应时快速失败 → recordImaStatus 告警 + imaReconcile 自愈补推，不再无上限挂起
   });
   return res.json();
 }

@@ -95,7 +95,7 @@ function rewriteKkfPreviewSource(url, hostHeader) {
   let src, u;
   try { src = Buffer.from(raw, 'base64').toString('utf8'); } catch (e) { return url; }
   try { u = new URL(src); } catch (e) { return url; }
-  const selfHosts = new Set(['example.com', 'www.example.com', 'localhost', '127.0.0.1']);
+  const selfHosts = new Set([(config.platform && config.platform.domain) || '', ('www.' + ((config.platform && config.platform.domain) || ''))].filter(Boolean));
   const host = String(hostHeader || '').split(':')[0].toLowerCase();
   if (host) selfHosts.add(host);
   if (!selfHosts.has(u.hostname.toLowerCase())) return url; // 非本站 → 不改写
@@ -115,7 +115,7 @@ function rewriteKkfPreviewSource(url, hostHeader) {
 //   页面同源 https → `/kkf/…` 自然解析成 https 同源地址，scheme/port 问题一并消除。
 //   只改 text/html 且必须未压缩；图片/JS/CSS/二进制原样透传。
 function rewriteKkfBody(body, hostHeader) {
-  const hosts = new Set(['example.com', 'www.example.com', 'localhost', '127.0.0.1']);
+  const hosts = new Set([(config.platform && config.platform.domain) || '', ('www.' + ((config.platform && config.platform.domain) || ''))].filter(Boolean));
   const h = String(hostHeader || '').split(':')[0].trim().toLowerCase();
   if (h) hosts.add(h);
   const alt = Array.from(hosts).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
@@ -225,6 +225,56 @@ app.use((req, res, next) => {
   return res.redirect(302, target);
 });
 
+// ── 公开配置（前端动态注入标题/主题色/域名/IMA 库名；不含任何密钥）────────
+// 用于前端「去硬编码品牌」：标题、PWA 名、主题色、域名、IMA 知识库名、双月开关均由此下发，
+// 院级差异集中在 institute.config.js，前端无需改代码。
+app.get('/api/public-config', (req, res) => {
+  const p = config.platform || {};
+  res.json({
+    platformName: p.name || '质量千里行',
+    shortName: p.shortName || '质量千里行',
+    orgName: p.orgName || '质量信息管理平台',
+    domain: p.domain || '',
+    themeColor: p.themeColor || '#0f7b6c',
+    imaKb: (config.ima && config.ima.kbName) || 'SHARE-知识库',
+    bimonthEnabled: !!(config.qualityCycle && config.qualityCycle.bimonthChampion),
+  });
+});
+
+// ── 动态 PWA manifest（替代静态 manifest.json，品牌随院配置变化）──────────
+app.get('/manifest.json', (req, res) => {
+  const p = config.platform || {};
+  const name = p.name || '质量千里行';
+  const shortName = p.shortName || '质量千里行';
+  const theme = p.themeColor || '#0f7b6c';
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({
+    name,
+    short_name: shortName,
+    description: name + ' · 质量信息管理平台',
+    lang: 'zh-CN',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: theme,
+    theme_color: theme,
+    id: '/',
+    categories: ['business', 'productivity'],
+    icons: [
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+    shortcuts: [
+      { name: '首页', url: '/' },
+      { name: 'PDCA 问题', url: '/#/pdca' },
+      { name: '质量库', url: '/#/work' },
+    ],
+  });
+});
+
 // 首屏优化①：启用 HTTP 压缩（gzip）。仅压缩 compressible 文本类型（HTML/JS/CSS/JSON）且体积 >1KB；
 // 字体(woff2 等)本身已压缩、图片另走静态，默认 filter 会自动跳过，不二次压缩。
 // 放在静态资源与 API 路由之前，确保首屏文本资源（约 1.16MB）被压缩到约 1/3。
@@ -261,6 +311,20 @@ app.use(express.static(webDir, {
   }
 }));
 
+// 库问答索引自动刷新（2026-10-16）：对内容源（公告/宣贯/PDCA/专题）的写操作成功后，
+// 防抖触发一次 qa_fts 重建，使「库问答」接近实时（实测整库重建 ~0.2s）。非阻塞、不影响响应，
+// 仅在 2xx 时触发；连续写由防抖合并。详见 src/qa_index.js 的 scheduleRebuild。
+{
+  const { scheduleRebuild } = require('./qa_index');
+  const QA_SRC = /^\/api\/(announcements|quality-dissem|pdca|quality-topics)(\/|$)/;
+  app.use((req, res, next) => {
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method) && QA_SRC.test(req.path || '')) {
+      res.on('finish', () => { if (res.statusCode < 400) { try { scheduleRebuild(); } catch (e) {} } });
+    }
+    next();
+  });
+}
+
 // API路由
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
@@ -295,7 +359,7 @@ app.get('/health', (req, res) => {
 // API版本信息
 app.get('/api', (req, res) => {
   res.json({
-    name: '质量千里行 API',
+    name: ((config.platform && config.platform.name) || '质量千里行') + ' API',
     version: '1.0.0',
     endpoints: {
       auth: '/api/auth',
@@ -336,7 +400,7 @@ process.on('uncaughtException', (err) => {
 // 启动服务
 const PORT = config.port;
 app.listen(PORT, () => {
-  console.log(`🚀 质量千里行 API 服务已启动`);
+  console.log(`🚀 ${(config.platform && config.platform.name) || '质量千里行'} API 服务已启动`);
   console.log(`   端口: ${PORT}`);
   console.log(`   环境: ${process.env.NODE_ENV || 'development'}`);
   console.log(`   健康检查: http://localhost:${PORT}/health`);

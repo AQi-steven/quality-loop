@@ -1202,21 +1202,29 @@
         el.innerHTML = `<div class="exam-sec-title">考试列表</div><div class="empty"><div class="ei">📝</div><div class="et">${isAdmin ? '暂无考试，点上方「开始新考试」发起第一场' : '暂无考试'}</div><div class="es">新的考试发布后会显示在这里</div></div>`;
         return;
       }
-      el.innerHTML = `<div class="exam-sec-title">考试列表（${rounds.length}）</div>` + rounds.map(r => `
+      el.innerHTML = `<div class="exam-sec-title">考试列表（${rounds.length}）</div>` + rounds.map(r => {
+        const opened = !!r.opened;
+        const closed = isAdmin && !opened;
+        return `
         <div class="exam-round-card">
           <div class="exam-round-top">
             <span class="exam-round-title">${esc(r.title)}</span>
             <span class="exam-round-by">由 ${esc(r.created_by_name || '—')}</span>
           </div>
-          <div class="exam-round-scope">${r.scope.map(d => `<span class="exam-scope-tag">${esc(d)}</span>`).join('')}</div>
-          <div class="exam-round-meta">共 ${r.count || 10} 题 · ${UI.relTime(r.created_at)} · ${r.done_count} 人已完成</div>
+          <div class="exam-round-scope">${r.scope.map(d => `<span class="exam-scope-tag">${esc(d)}</span>`).join('')}${opened
+            ? '<span class="exam-open-tag on">● 已开放</span>'
+            : '<span class="exam-open-tag off">○ 未开放</span>'}</div>
+          <div class="exam-round-meta">共 ${r.count || 10} 题 · ${UI.relTime(r.created_at)} · ${r.done_count} 人已完成${closed ? ' · 考生暂不可进入' : ''}</div>
           <div class="row-btns mt8">
-            ${(App.caps.isGuest && !App.caps.canExam) ? '' : `<button class="btn btn-sm btn-primary" onclick="Pages.examTake(${r.id})">${r.my_done ? '查看我的成绩' : '进入考试'}</button>`}
+            ${(App.caps.isGuest && !App.caps.canExam) ? '' : (opened || r.my_done
+              ? `<button class="btn btn-sm btn-primary" onclick="Pages.examTake(${r.id})">${r.my_done ? '查看我的成绩' : '进入考试'}</button>`
+              : `<button class="btn btn-sm btn-primary" disabled style="opacity:.5;cursor:not-allowed">等待开放</button>`)}
             ${(App.caps.isGuest && !App.caps.canExam) ? '' : `<button class="btn btn-sm btn-outline" onclick="Pages.examRanking(${r.id})">🏆 排名</button>`}
+            ${isAdmin ? `<button class="btn btn-sm ${opened ? 'btn-danger-outline' : 'btn-success-outline'}" onclick="Pages.examToggleRound(${r.id}, ${opened ? 1 : 0})">${opened ? '⏸ 关闭收卷' : '▶ 开放考试'}</button>` : ''}
             ${isAdmin ? `<button class="btn btn-sm btn-danger-outline" onclick="Pages.examDeleteRound(${r.id})">🗑 删除</button>` : ''}
           </div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     } catch (e) { el.innerHTML = `<div class="text-muted" style="padding:12px">加载失败：${esc(e.message)}</div>`; }
   }
 
@@ -1281,7 +1289,7 @@
           // 出题人组卷后不自动进入作答（避免「一出完就被计时」）；回到列表，由「进入考试」触发个人计时
           examView = 'list'; examRoundId = null; examCurrent = null; examAnswers = [];
           const bd = examBody(); if (bd) await renderExam(bd);
-          UI.toast('考试已创建；点「进入考试」后才开始计时');
+          UI.toast('考试已创建（未开放）——点「▶ 开放考试」后考生才能进入');
         }
         catch (e) { UI.toast(e.message); } finally { UI.loading(false); }
       };
@@ -1448,6 +1456,23 @@
     examView = 'list'; examCurrent = null; examRoundId = null;
     const body = examBody();
     if (body) renderExam(body);
+  };
+
+  // 开放 / 关闭一场考试（大会开关），仅超级管理员/×××/××× 可调
+  Pages.examToggleRound = async (roundId, currentlyOpened) => {
+    if (!isExamAdminFront()) { UI.toast('仅 超级管理员 / ××× / ××× 可操作考试开关'); return; }
+    const going = currentlyOpened ? '关闭' : '开放';
+    const tip = currentlyOpened
+      ? '关闭后新考生将无法进入本场考试（已开始作答的考生仍可保存草稿并交卷）。确定关闭收卷？'
+      : '开放后所有人都可进入本场考试并开始计时作答。确定开放？';
+    if (!(await UI.confirm(tip))) return;
+    try {
+      UI.loading(true);
+      const d = await API.post(`/api/exam/rounds/${roundId}/toggle`, {});
+      UI.toast(d && d.opened ? '已开放，考生可以进入了' : '已关闭，新考生不可进入');
+      const body = examBody();
+      if (body) { loadExamList(body); }
+    } catch (e) { UI.toast(e.message || (going + '失败')); } finally { UI.loading(false); }
   };
 
   // 删除一场考试（含其答卷），仅超级管理员/×××/××× 可调
@@ -2229,7 +2254,7 @@
             <label class="tl-pick"><input type="checkbox" ${picked.has(r.target_type + '#' + r.id) ? 'checked' : ''}></label>
             <div class="tl-main"><div class="tl-title">${esc(r.title || '')}</div>
             <div class="text-muted"><span class="badge">${esc(TOPIC_TYPE_LABEL[r.target_type] || r.target_type)}</span> ${rowDivisions(r).length ? `<span class="badge badge-div">${esc(rowDivisions(r).join('/'))}</span> ` : ''}${esc(r.target_type === 'pdca' ? (r.code || '') + ' · ' : '')}${esc(r.publisher || r.reporter || '')} · ${esc((r.created_at || '').slice(0, 10))}</div></div>
-            <button class="btn btn-sm btn-primary" data-act="add">加入</button></div>`).join('')
+            </div>`).join('')
           + `<div class="tl-foot"><button class="btn btn-sm btn-primary btn-block" data-act="batch">关联所选</button></div>`;
         listEl.querySelectorAll('.tl-item').forEach(el => {
           el.__row = { target_type: el.getAttribute('data-type'), id: Number(el.getAttribute('data-id')) };
@@ -2292,13 +2317,12 @@
       // 勾选：整行可点（多选核心交互）
       listEl.addEventListener('click', async (e) => {
         const row = e.target.closest('.tl-item');
-        const btn = e.target.closest('button[data-act="add"]');
         const batch = e.target.closest('button[data-act="batch"]');
         if (batch) {
           const rows = [...picked.values()];
           return submit(rows, batch);
         }
-        if (!row || btn) return;
+        if (!row) return;
         const k = row.getAttribute('data-key');
         if (picked.has(k)) picked.delete(k); else picked.set(k, row.__row);
         syncPickedUI();

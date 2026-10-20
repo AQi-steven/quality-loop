@@ -9,12 +9,19 @@
  * amount：单条发放数量（默认 1，宣贯/院选为 3）。
  */
 const db = require('./db/connection');
+const institute = require('./institute');
 
 // 不参与小红花评选的岗位（默认：专总/院长/总工/系统管理员/leader）
 const FLOWER_EXCLUDE_ROLES = ['chief', 'dean', 'chief_engineer', 'admin', 'leader'];
 // 例外白名单：以下用户虽具管理/专总身份，仍参与小红花评选（业务指定：×××/×××/×××）
 // 与 summary/adjustments/adjust/me 共用，保证排除集一致性，杜绝「幽灵红花」
 const FLOWER_ELIGIBLE_IDS = new Set([83, 11, 55]);
+// 不参与小红花评选的专业（2026-10-13 用户裁定：咨询为跨专业聚合维度，不参评排名；与其
+//   「不参与筛选 / 提醒 / 排名」授权一致）。与 FLOWER_EXCLUDE_ROLES 并列，杜绝幽灵红花。
+// 院级差异外置：值随院不同（科室划分不同），从 institute.config 读取。
+const FLOWER_EXCLUDE_DIVISIONS = (institute.flowerExcludeDivisions && institute.flowerExcludeDivisions.length)
+  ? institute.flowerExcludeDivisions
+  : ['咨询'];
 // 是否应排除（不计入评选）。例外名单中的用户始终参与。
 function flowerShouldExclude(role, userId) {
   if (userId != null && FLOWER_ELIGIBLE_IDS.has(userId)) return false;
@@ -38,6 +45,12 @@ function awardFlower({ kind, refId, userName, userId = null, title = '', awarded
       ? (db.prepare('SELECT role FROM users WHERE id=?').get(userId) || {}).role
       : (db.prepare('SELECT role FROM users WHERE real_name=?').get(userName) || {}).role;
     if (flowerShouldExclude(role, userId)) return null;
+    // 不参与小红花评选的专业（咨询）其任何行为都不计入统计，故不向其发放小红花
+    // （与 display / settle 排除集一致，避免写入「存在但不显示」的幽灵记录）
+    const div = userId != null
+      ? (db.prepare('SELECT division FROM users WHERE id=?').get(userId) || {}).division
+      : (db.prepare('SELECT division FROM users WHERE real_name=?').get(userName) || {}).division;
+    if (FLOWER_EXCLUDE_DIVISIONS.includes(String(div || '').trim())) return null;
     const ex = db.prepare('SELECT id FROM red_flowers WHERE kind=? AND ref_id=?').get(kind, refId);
     if (ex) return null; // 已发放过，跳过
     const info = db.prepare(
@@ -62,7 +75,7 @@ function removeFlowers(kind, refId) {
   }
 }
 
-module.exports = { awardFlower, removeFlowers, FLOWER_ELIGIBLE_IDS, FLOWER_EXCLUDE_ROLES, flowerShouldExclude, settlePreviousMonth, settleBimonthChampion };
+module.exports = { awardFlower, removeFlowers, FLOWER_ELIGIBLE_IDS, FLOWER_EXCLUDE_ROLES, FLOWER_EXCLUDE_DIVISIONS, flowerShouldExclude, settlePreviousMonth, settleBimonthChampion };
 
 /**
  * 结算「上月月冠军」：统计上一自然月（东八区 +8 hours，与全站展示口径一致）小红花月度总数（含质量工作奖惩）最高的 eligible 用户，
@@ -94,13 +107,16 @@ function settlePreviousMonth(database) {
         AND (u.id IS NULL OR (u.role IS NULL OR u.role NOT IN (${EXCLUDE.map(r => `'${r}'`).join(',')}) OR u.id IN (${ELIGIBLE_IDS})))
     ) GROUP BY userName HAVING total > 0
   `).all();
-  if (!rows.length) {
+  // 不参与评选的专业（咨询）排除：避免咨询被列为月冠军（与其不参评口径一致）
+  const consultNames = new Set(conn.prepare("SELECT real_name FROM users WHERE division='咨询'").all().map(r => r.real_name));
+  const rows2 = rows.filter(r => !consultNames.has(r.userName));
+  if (!rows2.length) {
     // 上月无人产生小红花，仍写入一条「空结算」占位以避免每月重复扫描（status='empty'）
     conn.prepare("INSERT INTO month_champions (month, user_name, flower_count, status, type) VALUES (?, '', 0, 'empty', 'month')").run(monthStr);
     return { settled: true, month: monthStr, winners: [], empty: true };
   }
-  const max = Math.max(...rows.map(r => r.total));
-  const winners = rows.filter(r => r.total === max);
+  const max = Math.max(...rows2.map(r => r.total));
+  const winners = rows2.filter(r => r.total === max);
   const ins = conn.prepare("INSERT INTO month_champions (month, user_name, flower_count, type) VALUES (?, ?, ?, 'month')");
   const out = [];
   for (const w of winners) {
@@ -119,6 +135,11 @@ function settlePreviousMonth(database) {
  */
 function settleBimonthChampion(database) {
   const conn = database || db;
+  // 特性开关：仅当院级配置开启「质量双月冠军」时才结算（其他院可关，避免无意义的占位记录）。
+  // 本院 production 默认开启（qualityCycle.bimonthChampion=true）。
+  if (!(institute.qualityCycle && institute.qualityCycle.bimonthChampion)) {
+    return { settled: false, skipped: true, reason: 'disabled', month: null, winners: [] };
+  }
   // 仅在「上一月 = 10 月」时触发（=11 月 1 日结算 10 月）；其余月份跳过
   const prev = conn.prepare("SELECT strftime('%Y-%m','now','+8 hours','-1 month') AS ym, strftime('%m','now','+8 hours','-1 month') AS m, strftime('%Y','now','+8 hours','-1 month') AS y").get();
   if (prev.m !== '10') return { settled: false, skipped: true, reason: 'not-october', month: null, winners: [] };
@@ -145,12 +166,15 @@ function settleBimonthChampion(database) {
         AND (u.id IS NULL OR (u.role IS NULL OR u.role NOT IN (${EXCLUDE.map(r => `'${r}'`).join(',')}) OR u.id IN (${ELIGIBLE_IDS})))
     ) GROUP BY userName HAVING total > 0
   `).all();
-  if (!rows.length) {
+  // 不参与评选的专业（咨询）排除：避免咨询被列为双月冠军（与其不参评口径一致）
+  const consultNames = new Set(conn.prepare("SELECT real_name FROM users WHERE division='咨询'").all().map(r => r.real_name));
+  const rows2 = rows.filter(r => !consultNames.has(r.userName));
+  if (!rows2.length) {
     conn.prepare("INSERT INTO month_champions (month, user_name, flower_count, status, type) VALUES (?, '', 0, 'empty', 'bimonth')").run(monthStr);
     return { settled: true, month: monthStr, winners: [], empty: true };
   }
-  const max = Math.max(...rows.map(r => r.total));
-  const winners = rows.filter(r => r.total === max);
+  const max = Math.max(...rows2.map(r => r.total));
+  const winners = rows2.filter(r => r.total === max);
   const ins = conn.prepare("INSERT INTO month_champions (month, user_name, flower_count, type) VALUES (?, ?, ?, 'bimonth')");
   const out = [];
   for (const w of winners) {

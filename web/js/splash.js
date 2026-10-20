@@ -1,12 +1,16 @@
 /**
  * 开场小红花动画（质量管理部门 · 质量千里行）
  *
- * - 何时显示：每次「整页加载」都显示一次——包括新标签打开链接、刷新页面、关闭网页后再打开。
- *   SPA 内部切 tab / hash 路由跳转不重载页面，不会重复触发（天然符合「在 tab 中各种选择不算首次」）。
- * - 同一页面加载内只显示一次（shownThisLoad 瞬时守卫，防止 App.init 冷启动与登录回调重复触发）；
- *   不做任何跨刷新的 localStorage 持久化标记，所以刷新/重开必会再次出现。
- * - 一朵 🌸（与小红花榜 fb-bloom 同一朵樱花、同一绽放节奏）由小放大+轻微旋转绽放，下方显示当前「本月」领先者姓名
- *   （与红花榜「本月领先」口径一致：summary.month，含质量工作奖惩）
+ * - 频率（2026-10-18 大会加固，用户拍板）：每台设备**每天仅一次**
+ *   （localStorage 记日期，同一天内刷新/重开/新标签不再演出，跨天自动恢复；
+ *   隐私模式等 localStorage 不可用时退回"每次整页加载都演出"的旧行为）。
+ * - 时机（2026-10-18 大会加固，用户拍板）：遮罩**立即**演出（不再空等接口），
+ *   「本月领先者」并行拉取后填入姓名位——姓名淡入有 0.78s 动画延迟，接口通常
+ *   ~300ms 内返回，几乎总能准时随花出现；遮罩 3.2s 后自动淡出，不阻塞任何操作。
+ * - SPA 内部切 tab / hash 路由跳转不重载页面，不会重复触发。
+ * - 一朵 🌸（与小红花榜 fb-bloom 同一朵樱花、同一绽放节奏）由小放大+轻微旋转绽放，
+ *   下方显示当前「本月」领先者姓名（与红花榜「本月领先」口径一致：summary.month，
+ *   含质量工作奖惩）。
  * - 纯装饰层（pointer-events:none），约 3.2s 后自动淡出，不阻塞任何操作
  * - 尊重 prefers-reduced-motion：关闭动画直接显示静态花朵
  */
@@ -14,8 +18,22 @@
   'use strict';
 
   // 同一「整页加载」内只显示一次的瞬时守卫（防止 App.init 冷启动与登录成功回调在同一加载里重复触发）。
-  // 不做跨刷新持久化：刷新 / 关闭重开都算新的整页加载，会重新出现——这是预期行为。
   var shownThisLoad = false;
+  // 每天仅一次：记录上次演出日期（YYYY-MM-DD，本地时区）
+  var SPLASH_DAY_KEY = 'qc_splash_last_day';
+
+  function todayKey() {
+    var d = new Date();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+  function alreadyShownToday() {
+    try { return localStorage.getItem(SPLASH_DAY_KEY) === todayKey(); } catch (e) { return false; }
+  }
+  function markShownToday() {
+    try { localStorage.setItem(SPLASH_DAY_KEY, todayKey()); } catch (e) { /* 隐私模式：不持久化，退回每次演出 */ }
+  }
 
   // 解析 API 引用：api.js 用「顶层 const API」声明（经典脚本顶层 const 不会挂到 window），
   // 因此绝不能写 window.API，须直接引用全局词法环境中的 API；同时兼容个别环境挂到 window 的情况。
@@ -64,82 +82,103 @@
     document.head.appendChild(s);
   }
 
+  // 从 summary 列表挑真正的本月领先者（与红花榜「本月领先」口径一致：month 含质量工作奖惩）
+  function pickLeader(list) {
+    if (!Array.isArray(list) || !list.length) return { name: '', caption: '本月小红花榜进行中' };
+    var sorted = list.slice().sort(function (a, b) {
+      return (b.month - a.month) || (b.count - a.count) || (a.userName < b.userName ? -1 : 1);
+    });
+    var top = sorted[0];
+    var nm = (top.userName || '').trim();
+    if (nm === '匿名') nm = '';
+    var monthVal = top.month || 0;
+    if (monthVal > 0 && nm) {
+      return { name: nm, caption: '⭐ 本月领先 · ' + monthVal + ' 朵小红花' };
+    }
+    // 本月暂无人产生红花：绝不杜撰姓名
+    return { name: '', caption: '本月小红花榜进行中' };
+  }
+
+  // 数据就绪后立即放遮罩开始演出；领先者数据并行拉取，回来后填入姓名位
+  // （姓名淡入有 0.78s 动画延迟，接口通常 ~300ms 内返回，几乎总能准时出现；
+  //  极端慢网时姓名会晚一点 pop 出来，但遮罩不再空等接口）
+  function renderSplash() {
+    injectStyle();
+
+    var ov = document.createElement('div');
+    ov.className = 'qc-splash';
+    ov.innerHTML =
+      '<div class="qc-glow"></div>' +
+      '<div class="qc-bloom">🌸</div>' +
+      '<div class="qc-name"></div>' +
+      '<div class="qc-caption">本月小红花领先</div>';
+
+    document.body.appendChild(ov);
+
+    var nameEl = ov.querySelector('.qc-name');
+    var capEl = ov.querySelector('.qc-caption');
+
+    // 数据回来 → 填入姓名（遮罩仍在则更新，已消失则忽略）
+    function fillLeader(state) {
+      if (!ov.parentNode) return;
+      var nm = (state && state.name) || '';
+      if (nm) {
+        if (nameEl) nameEl.textContent = nm;
+        if (capEl) capEl.innerHTML = state.caption;
+      } else {
+        if (nameEl) nameEl.textContent = '🌸';
+        if (capEl) capEl.textContent = (state && state.caption) || '质量千里行';
+      }
+    }
+
+    // 下一帧再加 .show，确保过渡动画生效
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { ov.classList.add('show'); });
+    });
+
+    var dismissed = false;
+    function dismiss() {
+      if (dismissed) return;
+      dismissed = true;
+      ov.classList.remove('show');
+      setTimeout(function () { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 600);
+    }
+
+    // 约 3.2 秒后自动淡出
+    setTimeout(dismiss, 3200);
+
+    // 开局 0.6s 后，首次交互可提前关闭（不拦截底层操作）
+    setTimeout(function () {
+      document.addEventListener('click', dismiss, { once: true });
+      document.addEventListener('touchstart', dismiss, { once: true });
+      document.addEventListener('keydown', dismiss, { once: true });
+    }, 600);
+
+    return fillLeader;
+  }
+
   function show() {
     try {
       var api = getApi();
       if (!api) return;
 
-      // 同一整页加载内只放一次（瞬时守卫，不跨刷新）；刷新/重开都算新加载，会再次出现
       if (shownThisLoad) return;
+      // 每天仅一次：今天已演出过则直接跳过（跨天自动恢复）
+      if (alreadyShownToday()) return;
       shownThisLoad = true;
+      markShownToday();
 
-      injectStyle();
-
-      var ov = document.createElement('div');
-      ov.className = 'qc-splash';
-      ov.innerHTML =
-        '<div class="qc-glow"></div>' +
-        '<div class="qc-bloom">🌸</div>' +
-        '<div class="qc-name"></div>' +
-        '<div class="qc-caption">本月小红花领先</div>';
-
-      document.body.appendChild(ov);
-
-      // 下一帧再加 .show，确保过渡动画生效
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () { ov.classList.add('show'); });
-      });
-
-      // 拉取当前「本月」领先者（与小红花榜「本月领先」口径一致：summary.month，含质量工作奖惩）
-      api.get('/api/flowers/summary').then(function (list) {
-        var nameEl = ov.querySelector('.qc-name');
-        var capEl = ov.querySelector('.qc-caption');
-        if (Array.isArray(list) && list.length) {
-          // 按本月(month)降序；并列按总数(count)，再按姓名，取真正的本月领先者
-          var sorted = list.slice().sort(function (a, b) {
-            return (b.month - a.month) || (b.count - a.count) || (a.userName < b.userName ? -1 : 1);
-          });
-          var top = sorted[0];
-          var nm = (top.userName || '').trim();
-          if (nm === '匿名') nm = '';
-          var monthVal = top.month || 0;
-          if (monthVal > 0 && nm) {
-            // 真实存在本月领先者：显示姓名 + 本月领先
-            if (nameEl) nameEl.textContent = nm;
-            if (capEl) capEl.innerHTML = '⭐ 本月领先 · ' + monthVal + ' 朵小红花';
-          } else {
-            // 本月暂无人产生红花：绝不杜撰姓名，显示品牌占位
-            if (nameEl) nameEl.textContent = '🌸';
-            if (capEl) capEl.textContent = '本月小红花榜进行中';
-          }
-        } else {
-          if (nameEl) nameEl.textContent = '🌸';
-          if (capEl) capEl.textContent = '质量千里行';
-        }
-      }).catch(function () {
-        var nameEl = ov.querySelector('.qc-name');
-        var capEl = ov.querySelector('.qc-caption');
-        if (nameEl) nameEl.textContent = '🌸';
-        if (capEl) capEl.textContent = '质量千里行';
-      });
-
-      var dismissed = false;
-      function dismiss() {
-        if (dismissed) return;
-        dismissed = true;
-        ov.classList.remove('show');
-        setTimeout(function () { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 600);
+      // 先立即放遮罩演出，同时并行拉「本月」领先者（生产实测 ~14ms/外网 ~300ms）
+      var fillLeader = renderSplash();
+      try {
+        api.get('/api/flowers/summary').then(function (list) {
+          fillLeader(pickLeader(list));
+        }).catch(function () {
+          fillLeader({ name: '', caption: '质量千里行' });
+        });
+      } catch (e) {
+        fillLeader({ name: '', caption: '质量千里行' });
       }
-
-      // 约 3.2 秒后自动淡出
-      setTimeout(dismiss, 3200);
-
-      // 开局 0.6s 后，首次交互可提前关闭（不拦截底层操作）
-      setTimeout(function () {
-        document.addEventListener('click', dismiss, { once: true });
-        document.addEventListener('touchstart', dismiss, { once: true });
-        document.addEventListener('keydown', dismiss, { once: true });
-      }, 600);
     } catch (e) {
       // 任何异常都不应影响主程序
     }
